@@ -1,0 +1,73 @@
+pipeline {
+    agent any
+
+    environment {
+        MODEL_THRESHOLD = "0.85"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'pip install pandas scikit-learn joblib'
+            }
+        }
+
+        stage('Train Model') {
+            steps {
+                sh 'python training/train.py'
+            }
+        }
+
+        stage('Test Model') {
+            steps {
+                sh 'python training/evaluate.py > accuracy.txt'
+            }
+        }
+
+        stage('Validate Model') {
+            steps {
+                script {
+                    def acc = sh(script: "cat accuracy.txt | grep -o '[0-9].*'", returnStdout: true).trim()
+                    if (acc.toFloat() < env.MODEL_THRESHOLD.toFloat()) {
+                        error "Model accuracy ${acc} is below threshold. Stopping deployment."
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh 'docker build -t fraud-api:latest .'
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                sh 'echo Pushing image to AWS ECR'
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                sh 'kubectl apply -f k8s/'
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo "Pipeline failed. Model not deployed."
+        }
+        success {
+            echo "New ML model deployed successfully."
+        }
+    }
+}
+
